@@ -1,52 +1,44 @@
--- BaroStats v1 - sends barotrauma game session json info to an endpoint or a file
+-- BaroStats v2 - sends barotrauma game session json info to an endpoint or a file
 -- by MassCraxx
 
 if CLIENT then return end
 
 local path = table.pack(...)[1]
-
 local json = dofile(path.."/json.lua")
-
--- CONFIG
-local UpdateDelaySeconds = nil	-- If not nil, will checkstats every UpdateDelaySeconds
---local PostToEndpoint = true
---local EndPoint = "http://localhost:8080/update-status"
-local WriteToFile = true
-local CheckTickTimes = false	-- If true, will measure tick times for all mods, this may reduce overall performance
-
 local updateTime = 0
 
-local stats = {}
-stats["Performance"] = {}
+BaroStats = {}
+BaroStats.Stats = {}
+BaroStats.Stats["Performance"] = {}
+BaroStats.Config = dofile(path.."/config.lua")
 
-if CheckTickTimes and PerformanceCounter then
+if BaroStats.Config.CheckTickTimes and PerformanceCounter then
     Game.Log("[BaroStats] PerformanceCounter active", 6)
     PerformanceCounter.EnablePerformanceCounter = true
 else
-    CheckTickTimes = false
+    BaroStats.Config.CheckTickTimes = false
 end
 
-BaroStats = {}
 BaroStats.AddStat = function(key, value)
-    stats[key] = value
+    BaroStats.Stats[key] = value
 end
 
 BaroStats.ResetTimer = function()
-    updateTime = Timer.GetTime() + (UpdateDelaySeconds or 0)
+    updateTime = Timer.GetTime() + (BaroStats.Config.UpdateDelaySeconds or 0)
 end
 
 BaroStats.UpdateStats = function()
-    local statsJson = json.encode(stats)
+    local statsJson = json.encode(BaroStats.Stats)
 
-    if WriteToFile then
+    if BaroStats.Config.WriteStatsToFile then
         Game.Log("[BaroStats] Writing stats to disk...", 6)
         File.Write(path.."/stats.json", statsJson)
     end
 
-    if PostToEndpoint and EndPoint then
-        Networking.HttpPost(EndPoint, function(result)
-            Game.Log("[BaroStats] UpdateStats POST complete. Result: " .. result, 6)
-        end, statsJson)
+    if BaroStats.Config.SendStatsToEndpoint and BaroStats.Config.StatsEndPoint and Networking.HttpRequest then
+        Networking.HttpRequest(BaroStats.Config.StatsEndPoint, function(result)
+            Game.Log("[BaroStats] UpdateStats " .. BaroStats.Config.StatsRequestType .. " complete. Result: " .. result, 6)
+        end, statsJson, BaroStats.Config.StatsRequestType)
     end
 end
 
@@ -55,9 +47,9 @@ BaroStats.CheckPlayerStats = function()
     Timer.Wait(function () 
         BaroStats.ResetTimer()
         
-        stats["Clients"] = {}
-        stats["ClientsOnServer"] = #Client.ClientList
-        stats["RoundStarted"] = Game.RoundStarted
+        BaroStats.Stats["Clients"] = {}
+        BaroStats.Stats["ClientsOnServer"] = #Client.ClientList
+        BaroStats.Stats["RoundStarted"] = Game.RoundStarted
 
         if #Client.ClientList > 0 then
 
@@ -71,13 +63,14 @@ BaroStats.CheckPlayerStats = function()
                 clientStats.Ping = client.Ping
                 clientStats.Karma = client.Karma
                 if client.CharacterInfo and client.CharacterInfo.Job then
-                    if JustClownThings and JustClownThings.Clowns and client.Character and JustClownThings.Clowns[client.Character] then
+                    if JustClownThings and JustClownThings.Clowns and client.Character 
+                        and JustClownThings.Clowns[client.Character] and client.Character.TeamID == 0 then
                         clientStats.CharacterJob = "clown"
                     else
                         clientStats.CharacterJob = client.CharacterInfo.Job.Prefab.Identifier.Value
                     end
                 end
-                stats["Clients"][client.SteamID] = clientStats
+                BaroStats.Stats["Clients"][client.SteamID] = clientStats
 
                 pingAverage = pingAverage + client.Ping
 
@@ -89,19 +82,19 @@ BaroStats.CheckPlayerStats = function()
             end
             pingAverage = pingAverage / #Client.ClientList
 
-            stats["ClientsInGame"] = playersInGame
-            stats["ClientsSpectating"] = spectators
-            stats["ClientsPingAvg"] = pingAverage
+            BaroStats.Stats["ClientsInGame"] = playersInGame
+            BaroStats.Stats["ClientsSpectating"] = spectators
+            BaroStats.Stats["ClientsPingAvg"] = pingAverage
         else
-            stats["ClientsInGame"] = 0
-            stats["ClientsSpectating"] = 0
-            stats["ClientsPingAvg"] = 0
+            BaroStats.Stats["ClientsInGame"] = 0
+            BaroStats.Stats["ClientsSpectating"] = 0
+            BaroStats.Stats["ClientsPingAvg"] = 0
         end
 
         if Submarine.MainSub then
-            stats["Submarine"] = Submarine.MainSub.Info.Name
+            BaroStats.Stats["Submarine"] = Submarine.MainSub.Info.Name
         else
-            stats["Submarine"] = "Lobby"
+            BaroStats.Stats["Submarine"] = "Lobby"
         end
 
         BaroStats.UpdateStats()
@@ -124,50 +117,62 @@ Hook.Add("client.disconnected", "BaroStats.clientDisconnected", function ()
     BaroStats.CheckPlayerStats()
 end)
 
+if BaroStats.Config.CheckTickTimes or BaroStats.Config.UpdateDelaySeconds then
 Hook.Add("think", "BaroStats.Think", function ()
-    if CheckTickTimes then
+    if BaroStats.Config.CheckTickTimes then
         -- PerformanceCounter.HookElapsedTime and PerformanceCounter.UpdateElapsedTime
         -- HookElapsedTime is a table that contains how much time each hook took to process
         -- UpdateElapsedTime is just a number that shows how much time is taking for the game to process everything
         -- PerformanceCounter.HookElapsedTime["think"]["yourHookName"]
         
         for key, value in pairs(PerformanceCounter.HookElapsedTime) do
-            if stats["Performance"][key] == nil then
-                stats["Performance"][key] = {}
+            if BaroStats.Stats["Performance"][key] == nil then
+                BaroStats.Stats["Performance"][key] = {}
             end
             for key2, value2 in pairs(value) do
-                if stats["Performance"][key][key2] == nil then
-                    stats["Performance"][key][key2] = {}
+                if BaroStats.Stats["Performance"][key][key2] == nil then
+                    BaroStats.Stats["Performance"][key][key2] = {}
                 end
-                if (stats["Performance"][key][key2].Min or 999) > value2 then
-                    stats["Performance"][key][key2].Min = value2
+                if (BaroStats.Stats["Performance"][key][key2].Min or 999) > value2 then
+                    BaroStats.Stats["Performance"][key][key2].Min = value2
                 end
 
-                if (stats["Performance"][key][key2].Max or -1) < value2 then
-                    stats["Performance"][key][key2].Max = value2
+                if (BaroStats.Stats["Performance"][key][key2].Max or -1) < value2 then
+                    BaroStats.Stats["Performance"][key][key2].Max = value2
                 end
             end
         end
 
-        if stats["Performance"].UpdateElapsedTime == nil then
-            stats["Performance"].UpdateElapsedTime = {}
+        if BaroStats.Stats["Performance"].UpdateElapsedTime == nil then
+            BaroStats.Stats["Performance"].UpdateElapsedTime = {}
         end
 
-        if (stats["Performance"].UpdateElapsedTime.Min or 999) > PerformanceCounter.UpdateElapsedTime then
-            stats["Performance"].UpdateElapsedTime.Min = PerformanceCounter.UpdateElapsedTime
+        if (BaroStats.Stats["Performance"].UpdateElapsedTime.Min or 999) > PerformanceCounter.UpdateElapsedTime then
+            BaroStats.Stats["Performance"].UpdateElapsedTime.Min = PerformanceCounter.UpdateElapsedTime
         end
 
-        if (stats["Performance"].UpdateElapsedTime.Max or -1) < PerformanceCounter.UpdateElapsedTime then
-            stats["Performance"].UpdateElapsedTime.Max = PerformanceCounter.UpdateElapsedTime
+        if (BaroStats.Stats["Performance"].UpdateElapsedTime.Max or -1) < PerformanceCounter.UpdateElapsedTime then
+            BaroStats.Stats["Performance"].UpdateElapsedTime.Max = PerformanceCounter.UpdateElapsedTime
         end
     end
 
-    if UpdateDelaySeconds and Timer.GetTime() > updateTime then
+    if BaroStats.Config.UpdateDelaySeconds and Timer.GetTime() > updateTime then
         BaroStats.CheckPlayerStats()
     end
 end)
+end
 
-Game.AddCommand("writestats", "", function ()
+if BaroStats.Config.SendLogsToEndpoint then
+Hook.Add("serverLog", "BaroStats.serverLog", function (line, messageType)
+    local data = {}
+    data["Line"] = line
+    data["MessageType"] = messageType
+
+    Networking.HttpRequest(BaroStats.Config.LogsEndPoint, function(result) end, json.encode(data), BaroStats.Config.LogsRequestType)
+end)
+end
+
+Game.AddCommand("updatestats", "", function ()
     BaroStats.CheckPlayerStats()
 end)
 
