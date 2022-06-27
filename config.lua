@@ -12,6 +12,7 @@ config.StatsRequestType = "PATCH"
 config.SendLogsToEndpoint = false
 config.LogsEndPoint = config.Server .. "push-log"
 config.LogsRequestType = "POST"
+config.LogsSendDelay = 1
 
 -- EXTRAS --
 config.UpdateDelaySeconds = nil	-- If not nil, will check stats every UpdateDelaySeconds

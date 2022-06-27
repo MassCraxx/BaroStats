@@ -1,4 +1,4 @@
--- BaroStats v2 - sends barotrauma game session json info to an endpoint or a file
+-- BaroStats v3 - sends barotrauma game session json info to an endpoint or a file
 -- by MassCraxx
 
 if CLIENT then return end
@@ -6,13 +6,16 @@ if CLIENT then return end
 local path = table.pack(...)[1]
 local json = dofile(path.."/json.lua")
 local updateTime = 0
+local logSendTime = 0
+local pendingLogs = {}
 
 BaroStats = {}
 BaroStats.Stats = {}
-BaroStats.Stats["Performance"] = {}
+BaroStats.Stats["ClientsMax"] = Game.ServerSettings.MaxPlayers
 BaroStats.Config = dofile(path.."/config.lua")
 
 if BaroStats.Config.CheckTickTimes and PerformanceCounter then
+    BaroStats.Stats["Performance"] = {}
     Game.Log("[BaroStats] PerformanceCounter active", 6)
     PerformanceCounter.EnablePerformanceCounter = true
 else
@@ -21,10 +24,6 @@ end
 
 BaroStats.AddStat = function(key, value)
     BaroStats.Stats[key] = value
-end
-
-BaroStats.ResetTimer = function()
-    updateTime = Timer.GetTime() + (BaroStats.Config.UpdateDelaySeconds or 0)
 end
 
 BaroStats.UpdateStats = function()
@@ -45,11 +44,10 @@ end
 BaroStats.CheckPlayerStats = function()
     -- delay check to make sure hooks like roundEnded went through
     Timer.Wait(function () 
-        BaroStats.ResetTimer()
+        updateTime = Timer.GetTime() + (BaroStats.Config.UpdateDelaySeconds or 0)
         
         BaroStats.Stats["Clients"] = {}
         BaroStats.Stats["ClientsOnServer"] = #Client.ClientList
-        BaroStats.Stats["RoundStarted"] = Game.RoundStarted
 
         if #Client.ClientList > 0 then
 
@@ -91,6 +89,8 @@ BaroStats.CheckPlayerStats = function()
             BaroStats.Stats["ClientsPingAvg"] = 0
         end
 
+        BaroStats.Stats["RoundStarted"] = Game.RoundStarted
+        
         if Submarine.MainSub then
             BaroStats.Stats["Submarine"] = Submarine.MainSub.Info.Name
         else
@@ -99,6 +99,10 @@ BaroStats.CheckPlayerStats = function()
 
         BaroStats.UpdateStats()
     end, 1000)
+end
+
+BaroStats.SendLogs = function(data)
+    Networking.HttpRequest(BaroStats.Config.LogsEndPoint, function(result) end, json.encode(data), BaroStats.Config.LogsRequestType)
 end
 
 Hook.Add("roundStart", "BaroStats.roundStart", function ()
@@ -117,7 +121,7 @@ Hook.Add("client.disconnected", "BaroStats.clientDisconnected", function ()
     BaroStats.CheckPlayerStats()
 end)
 
-if BaroStats.Config.CheckTickTimes or BaroStats.Config.UpdateDelaySeconds then
+if BaroStats.Config.LogsSendDelay or BaroStats.Config.CheckTickTimes or BaroStats.Config.UpdateDelaySeconds then
 Hook.Add("think", "BaroStats.Think", function ()
     if BaroStats.Config.CheckTickTimes then
         -- PerformanceCounter.HookElapsedTime and PerformanceCounter.UpdateElapsedTime
@@ -159,6 +163,14 @@ Hook.Add("think", "BaroStats.Think", function ()
     if BaroStats.Config.UpdateDelaySeconds and Timer.GetTime() > updateTime then
         BaroStats.CheckPlayerStats()
     end
+
+    if BaroStats.Config.LogsSendDelay and Timer.GetTime() > logSendTime then
+        if #pendingLogs > 0 then
+            BaroStats.SendLogs(pendingLogs)
+            pendingLogs = {}
+        end
+        logSendTime = Timer.GetTime() + (BaroStats.Config.LogsSendDelay or 1)
+    end
 end)
 end
 
@@ -168,7 +180,11 @@ Hook.Add("serverLog", "BaroStats.serverLog", function (line, messageType)
     data["Line"] = line
     data["MessageType"] = messageType
 
-    Networking.HttpRequest(BaroStats.Config.LogsEndPoint, function(result) end, json.encode(data), BaroStats.Config.LogsRequestType)
+    if BaroStats.Config.LogsSendDelay then
+        table.insert(pendingLogs, data)
+    else
+        BaroStats.SendLogs(data)
+    end
 end)
 end
 
