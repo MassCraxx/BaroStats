@@ -1,4 +1,4 @@
--- BaroStats v3 - sends barotrauma game session json info to an endpoint or a file
+-- BaroStats v4 - sends barotrauma game session json info to an endpoint or a file
 -- by MassCraxx
 
 if CLIENT then return end
@@ -179,6 +179,7 @@ Hook.Add("serverLog", "BaroStats.serverLog", function (line, messageType)
     local data = {}
     data["Line"] = line
     data["MessageType"] = messageType
+    data["Time"] = os.time()
 
     if BaroStats.Config.LogsSendDelay then
         table.insert(pendingLogs, data)
