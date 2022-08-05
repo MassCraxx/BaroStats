@@ -1,4 +1,4 @@
--- BaroStats v4 - sends barotrauma game session json info to an endpoint or a file
+-- BaroStats v5 - sends barotrauma game session json info to an endpoint or a file
 -- by MassCraxx
 
 if CLIENT then return end
@@ -60,9 +60,14 @@ BaroStats.CheckPlayerStats = function()
                 clientStats.Name = client.Name
                 clientStats.Ping = client.Ping
                 clientStats.Karma = client.Karma
-                if client.CharacterInfo and client.CharacterInfo.Job then
+
+                if not client.InGame then
+                    clientStats.CharacterJob = "lobby"
+                elseif client.SpectateOnly then
+                    clientStats.CharacterJob = "spectator"
+                elseif client.CharacterInfo and client.CharacterInfo.Job then
                     if JustClownThings and JustClownThings.Clowns and client.Character 
-                        and JustClownThings.Clowns[client.Character] and client.Character.TeamID == 0 then
+                        and JustClownThings.Clowns[client.Character] and client.Character.TeamID ~= 0 then
                         clientStats.CharacterJob = "clown"
                     else
                         clientStats.CharacterJob = client.CharacterInfo.Job.Prefab.Identifier.Value
@@ -110,6 +115,10 @@ Hook.Add("roundStart", "BaroStats.roundStart", function ()
 end)
 
 Hook.Add("roundEnd", "BaroStats.roundEnd", function ()
+    if BaroStats.Config.SendTraitorStats and Traitormod and Traitormod.Stats then
+        BaroStats.Stats["TraitorStats"] = Traitormod.Stats.stats
+    end
+
     BaroStats.CheckPlayerStats()
 end)
 

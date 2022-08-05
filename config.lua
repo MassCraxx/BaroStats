@@ -17,5 +17,6 @@ config.LogsSendDelay = 1
 -- EXTRAS --
 config.UpdateDelaySeconds = nil	-- If not nil, will check stats every UpdateDelaySeconds
 config.CheckTickTimes = false	-- If true, will measure tick times for all mods, this may reduce overall performance
+config.SendTraitorStats = false  -- If true and TraitorMod v2.2+ is enabled, stats will include !stats
 
 return config
